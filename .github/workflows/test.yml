@@ -1,0 +1,71 @@
+name: test
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "pkg/**"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - ".github/workflows/test.yml"
+  pull_request:
+    branches:
+      - master
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "pkg/**"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - ".github/workflows/test.yml"
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.1"
+          cache: true
+
+      - name: Set up Bun
+        # Pinned to match the bun version that produced bun.lock;
+        # `bun install --frozen-lockfile` is sensitive to bun-major drift.
+        # Bump together with the local dev environment.
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.21"
+
+      - name: build SPA
+        # Must run before lint/test/build: //go:embed all:webui/dist
+        # is type-checked by golangci-lint (and resolved by `go build`),
+        # so the dist tree has to exist on disk before any Go tool runs.
+        run: make ui
+
+      - name: tidy
+        run: make tidy
+
+      - name: lint
+        run: make lint
+
+      - name: test
+        run: make test
+
+      - name: build
+        run: make build

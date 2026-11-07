@@ -1,0 +1,66 @@
+name: nightly-release
+
+on:
+  schedule:
+    # Daily at 00:00 UTC
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  create-nightly-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+      - name: Get latest version and create nightly tag
+        id: get_version
+        run: |
+          latest_version=$(git describe --tags --abbrev=0 --exclude="*-next")
+          nightly_version=$(echo $latest_version | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g')
+          nightly_tag="${nightly_version}-next"
+          echo "NIGHTLY_TAG=${nightly_tag}" >> $GITHUB_OUTPUT
+
+          git push origin :refs/tags/*-next || true
+          git tag -d $(git tag -l '*-next') || true
+          git tag $nightly_tag
+          git push origin $nightly_tag --force
+
+      - name: Delete old nightly release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NIGHTLY_TAG: ${{ steps.get_version.outputs.NIGHTLY_TAG }}
+        run: gh release delete $NIGHTLY_TAG --yes || true
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.1"
+          cache: true
+
+      - name: Set up Bun
+        # See release.yml — GoReleaser bypasses the Makefile so the SPA
+        # build runs via .goreleaser.yml's before-hook (`make ui`), which
+        # needs bun on PATH.
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.21"
+
+      - name: GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v1"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GORELEASER_GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ steps.get_version.outputs.NIGHTLY_TAG }}
